@@ -1,19 +1,19 @@
-
-# lca_multinomial_regression_unweighted.py
-
 """
-Multinomial Logistic Regression on LCA Class Membership (Unweighted)
-====================================================================
+Binary Logistic Regression on LCA Class Membership (Unweighted)
+================================================================
 
-This script performs an unweighted multinomial logistic regression analysis using LCA-derived classes
-of preventive health behavior as the outcome variable. Predictors include sociodemographics, psychosocial 
-factors, and mistrust.
+This script performs an unweighted binary logistic regression analysis 
+on LCA-derived class membership to identify predictors of low preventive 
+health engagement. Specifically, Class 2 (Globally Low Engagers) is 
+compared to Class 1 (Broadly Moderate Preventers).
 
 Inputs:
-- Dataset must contain a column 'LCA_class' and variables listed in 'predictor_vars'.
+- A dataset containing 'LCA_class' and all predictor variables.
+- Categorical predictors should follow the names used in the script.
 
 Outputs:
-- Excel file with regression coefficients, standard errors, p-values, and confidence intervals.
+- Console output of model summary
+- VIF table for multicollinearity check (optional export)
 
 Author: [Your Name]
 Date: 2025
@@ -21,35 +21,39 @@ Date: 2025
 
 import pandas as pd
 import statsmodels.api as sm
+import statsmodels.formula.api as smf
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+from patsy import dmatrices
 
 # Load data
 df = pd.read_excel("gesundheitskompetenz_with_LCA_classes.xlsx")
 
-# Define predictors and response
-predictor_vars = [
-    'GenderM0F1', 'AgeGroup', 'Education_cat', 'Language',
-    'has_chronic_disease', 'PAM_level_cat', 'HLS_score_cat',
-    'Mistrust_Index', 'Workinthehealthorsocialsector',
-    'Lives_Alone_binary'
-]
+# Filter for binary comparison: Class 2 (code = 2) vs. Class 1 (code = 1)
+df = df[df['LCA_class'].isin([1, 2])].copy()
+df['binary_class'] = df['LCA_class'].replace({1: 0, 2: 1})  # Class 2 = 1 (event), Class 1 = 0
 
-df_model = df[['LCA_class'] + predictor_vars].dropna()
+# Set correct dtypes for categorical variables
+categoricals = ['GenderM0F1', 'AgeGroup', 'Education_cat', 'Language', 
+                'HLS_score_cat', 'PAM_level_cat', 'Lives_Alone_binary', 
+                'Workinthehealthorsocialsector']
+for var in categoricals:
+    df[var] = df[var].astype('category')
 
-# Convert LCA_class to numeric codes and predictors to dummies
-df_model['LCA_class'] = pd.Categorical(df_model['LCA_class']).codes
-X = pd.get_dummies(df_model[predictor_vars], drop_first=True)
-y = df_model['LCA_class']
+# Define formula
+formula = 'binary_class ~ C(GenderM0F1) + C(AgeGroup) + C(Education_cat) + C(Language) + \
+has_chronic_disease + C(HLS_score_cat) + C(PAM_level_cat) + Mistrust_Index + \
+C(Lives_Alone_binary) + C(Workinthehealthorsocialsector)'
 
-# Add constant
-X = sm.add_constant(X)
+# Fit logistic regression model
+model = smf.logit(formula=formula, data=df)
+result = model.fit()
+print(result.summary2())
 
-# Fit multinomial logistic regression
-mnlogit = sm.MNLogit(y, X)
-result = mnlogit.fit(method='newton', maxiter=100, disp=False)
-
-# Save output to Excel
-summary_df = result.summary2().tables[1].reset_index()
-summary_df.rename(columns={'index': 'Variable'}, inplace=True)
-summary_df.to_excel("LCA_Multinomial_Regression_Unweighted_MNLogit.xlsx", index=False)
-
-print("Model output saved to 'LCA_Multinomial_Regression_Unweighted_MNLogit.xlsx'")
+# VIF calculation
+y, X = dmatrices(formula, data=df, return_type='dataframe')
+vif_data = pd.DataFrame({
+    'Variable': X.columns,
+    'VIF': [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]
+})
+print("\nVariance Inflation Factors (VIF):")
+print(vif_data)
